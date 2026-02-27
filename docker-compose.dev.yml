@@ -1,0 +1,125 @@
+
+# ======================
+# NETWORKS (DÉFINIR EN PREMIER)
+# ======================
+networks:
+  perfume-network:
+    driver: bridge
+    name: perfume-network
+
+# ======================
+# VOLUMES
+# ======================
+volumes:
+  postgres_data:
+    driver: local
+    name: perfume_postgres_data
+  postgres_test_data:
+    driver: local
+    name: perfume_postgres_test_data
+  redis_data:
+    driver: local
+    name: perfume_redis_data
+  kafka_data:
+    driver: local
+    name: perfume_kafka_data
+  zookeeper_data:
+    driver: local
+    name: perfume_zookeeper_data
+  zookeeper_logs:
+    driver: local
+    name: perfume_zookeeper_logs
+
+# ======================
+# SERVICES
+# ======================
+services:
+  # ======================
+  # PostgreSQL pour Auth-Service (Development)
+  # ======================
+  perfume-postgres:
+    image: postgres:15-alpine
+    container_name: perfume-postgres
+    environment:
+      POSTGRES_USER: perfume_auth_user
+      POSTGRES_PASSWORD: PerfumeAuth123
+      POSTGRES_DB: perfume_auth_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - perfume-network
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U perfume_auth_user -d perfume_auth_db']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ======================
+  # PostgreSQL Test Database (pour Tests)
+  # ======================
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: perfume-postgres-test
+    environment:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_DB: test_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    networks:
+      - perfume-network
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U test_user -d test_db']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ======================
+  # Redis pour Rate Limiting & Cache
+  # ======================
+  perfume-redis:
+    image: redis:7-alpine
+    container_name: perfume-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    networks:
+      - perfume-network
+    command: redis-server --appendonly yes --requirepass ""
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ======================
+  # Zookeeper (Required for Kafka)
+  # ======================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: perfume-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_LOG4J_ROOT_LOGLEVEL: WARN
+    ports:
+      - '2181:2181'
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    networks:
+      - perfume-network
+    restart: unless-stopped
+
+  # ======================
+  # Kafka (Event Streamin

@@ -1,0 +1,288 @@
+name: Auth-Service CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'apps/auth-service/**'
+      - '.github/workflows/auth-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/auth-service/**'
+
+env:
+  SERVICE_NAME: auth-service
+  WORKING_DIR: apps/auth-service
+
+jobs:
+  # ==============================================
+  # JOB 1: Lint & Format Check
+  # ==============================================
+  lint:
+    name: Lint & Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+      
+      - name: Install dependencies
+        working-directory: ${{ env.WORKING_DIR }}
+        run: pnpm install --frozen-lockfile
+      
+      - name: Run ESLint
+        working-directory: ${{ env.WORKING_DIR }}
+        run: pnpm lint || echo "⚠️ ESLint warnings (non-blocking)"
+      
+      - name: Check Prettier formatting
+        working-directory: ${{ env.WORKING_DIR }}
+        run: pnpm format:check || echo "⚠️ Format issues (non-blocking)"
+
+  # ==============================================
+  # JOB 2: Unit Tests
+  # ==============================================
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+      
+      - name: Install dependencies
+        working-directory: ${{ env.WORKING_DIR }}
+        run: pnpm install --frozen-lockfile
+      
+      - name: Run unit tests
+        working-directory: ${{ env.WORKING_DIR }}
+        run: pnpm test:unit
+
+  # ==============================================
+  # JOB 3: Integration Tests
+  # ==============================================
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+      
+      - name: Install dependencies
+        working-directory: ${{ env.WORKING_DIR }}
+        run: pnpm install --frozen-lockfile
+      
+      - name: Wait for PostgreSQL
+        run: |
+          for i in {1..30}; do
+            if pg_isready -h localhost -p 5433 -U test_user; then
+              echo "PostgreSQL is ready!"
+              break
+            fi
+            echo "Waiting for PostgreSQL... ($i/30)"
+            sleep 1
+          done
+      
+      - name: Run integration tests
+        working-directory: ${{ env.WORKING_DIR }}
+        run: pnpm test:integration
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: 5433
+          DB_USER: test_user
+          DB_PASSWORD: test_password
+          DB_NAME: test_db
+          JWT_SECRET: test-jwt-secret-key-minimum-32-characters-long
+          JWT_REFRESH_SECRET: test-refresh-secret-key-minimum-32-chars
+      
+      - name: Upload test coverage
+        uses: codecov/codecov-action@v3
+        if: always()
+        with:
+          files: ${{ env.WORKING_DIR }}/coverage/lcov.info
+          flags: auth-service
+          name: auth-service-coverage
+
+  # ==============================================
+  # JOB 4: SonarQube Code Quality
+  # ==============================================
+  sonarqube:
+    name: SonarQube Analysis
+    runs-on: ubuntu-latest
+    needs: [test-unit, test-integration]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+      
+      - name: Install dependencies
+        working-directory: ${{ env.WORKING_DIR }}
+        run: pnpm install --frozen-lockfile
+      
+      - name: Run tests for coverage
+        working-directory: ${{ env.WORKING_DIR }}
+        run: pnpm test:coverage || true
+      
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          projectBaseDir: ${{ env.WORKING_DIR }}
+          args: >
+            -Dsonar.projectKey=perfume-auth-service
+            -Dsonar.sources=src
+            -Dsonar.tests=tests
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.coverage.exclusions=**/*.test.js,**/tests/**
+
+  # ==============================================
+  # JOB 5: Security Scan (Trivy)
+  # ==============================================
+  security-scan:
+    name: Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    needs: [test-unit, test-integration]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Build Docker image
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          docker build \
+            --target production \
+            -t ${{ env.SERVICE_NAME }}:${{ github.sha }} \
+            .
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.SERVICE_NAME }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+      
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ==============================================
+  # JOB 6: Build & Push to Azure Container Registry
+  # ==============================================
+  build-and-push:
+    name: Build Docker Image & Push to ACR
+    runs-on: ubuntu-latest
+    needs: [lint, test-unit, test-integration, sonarqube, security-scan]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Login to Azure Container Registry
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+      
+      - name: Set image tags
+        id: image-tags
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "image_tag=${{ secrets.ACR_LOGIN_SERVER }}/${{ env.SERVICE_NAME }}:$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "latest_tag=${{ secrets.ACR_LOGIN_SERVER }}/${{ env.SERVICE_NAME }}:latest" >> $GITHUB_OUTPUT
+      
+      - name: Build Docker image
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          docker build \
+            --target production \
+            --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+            --build-arg VCS_REF=${{ github.sha }} \
+            --tag ${{ steps.image-tags.outputs.image_tag }} \
+            --tag ${{ steps.image-tags.outputs.latest_tag }} \
+            .
+      
+      - name: Push images to ACR
+        run: |
+          docker push ${{ steps.image-tags.outputs.image_tag }}
+          docker push ${{ steps.image-tags.outputs.latest_tag }}
+      
+      - name: Update Kubernetes manifest
+        run: |
+          sed -i "s|image:.*|image: ${{ steps.image-tags.outputs.image_tag }}|" \
+            infra/kubernetes/auth-service/deployment.yaml
+      
+      - name: Commit and push manifest changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add infra/kubernetes/auth-service/deployment.yaml
+          git commit -m "chore(auth): update image to ${{ steps.image-tags.outputs.short_sha }}" || echo "No changes"
+          git push || echo "Nothing to push"
