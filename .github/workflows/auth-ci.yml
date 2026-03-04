@@ -152,10 +152,10 @@ jobs:
           name: auth-service-coverage
 
   # ==============================================
-  # JOB 4: SonarQube Code Quality
+  # JOB 4: SonarCloud Code Quality
   # ==============================================
   sonarqube:
-    name: SonarQube Analysis
+    name: SonarCloud Analysis
     runs-on: ubuntu-latest
     needs: [test-unit, test-integration]
     
@@ -163,7 +163,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Shallow clones should be disabled for better analysis
       
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -176,27 +176,36 @@ jobs:
           version: 9.0.0
       
       - name: Install dependencies
-        #working-directory: ${{ env.WORKING_DIR }}
         run: pnpm install --frozen-lockfile
       
       - name: Run tests for coverage
-        #working-directory: ${{ env.WORKING_DIR }}
-        run: pnpm --filter auth-service test:coverage || true
-      
-      - name: SonarQube Scan
-        uses: sonarsource/sonarqube-scan-action@master
+        working-directory: ${{ env.WORKING_DIR }}
+        run: pnpm test:coverage || true
         env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: 5433
+          DB_USER: test_user
+          DB_PASSWORD: test_password
+          DB_NAME: test_db
+          JWT_SECRET: test-jwt-secret-key-minimum-32-characters-long
+          JWT_REFRESH_SECRET: test-refresh-secret-key-minimum-32-chars
+      
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         with:
-          projectBaseDir: ${{ env.WORKING_DIR }}
           args: >
-            -Dsonar.projectKey=perfume-auth-service
-            -Dsonar.sources=src
-            -Dsonar.tests=tests
-            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
-            -Dsonar.coverage.exclusions=**/*.test.js,**/tests/**
-
+            -Dsonar.organization=yahyaouiichrak
+            -Dsonar.projectKey=s-p-auth-service
+            -Dsonar.projectName=SamraPerfumes
+            -Dsonar.sources=apps/auth-service/src
+            -Dsonar.tests=apps/auth-service/tests
+            -Dsonar.javascript.lcov.reportPaths=apps/auth-service/coverage/lcov.info
+            -Dsonar.coverage.exclusions=**/*.test.js,**/tests/**,**/node_modules/**
+            -Dsonar.sourceEncoding=UTF-8
   # ==============================================
   # JOB 5: Security Scan (Trivy)
   # ==============================================
