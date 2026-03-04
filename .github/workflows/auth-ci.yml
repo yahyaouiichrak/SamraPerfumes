@@ -148,8 +148,8 @@ jobs:
           name: auth-service-coverage
           fail_ci_if_error: false
 
-  # ==============================================
-  # JOB 4: SonarCloud Analysis (CORRIGÉ)
+ # ==============================================
+  # JOB 4: SonarCloud Analysis (VERSION FINALE)
   # ==============================================
   sonarcloud:
     name: SonarCloud Analysis
@@ -182,10 +182,10 @@ jobs:
           NODE_ENV: test
       
       - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v5
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_HOST_URL: https://sonarcloud.io
         with:
           args: >
             -Dsonar.organization=yahyaouiichrak
