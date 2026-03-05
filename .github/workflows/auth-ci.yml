@@ -149,7 +149,7 @@ jobs:
           fail_ci_if_error: false
 
  # ==============================================
-  # JOB 4: SonarCloud Analysis (VERSION FINALE)
+  # JOB 4: SonarCloud Analysis (VERSION FINALE QUI MARCHE)
   # ==============================================
   sonarcloud:
     name: SonarCloud Analysis
@@ -181,22 +181,11 @@ jobs:
         env:
           NODE_ENV: test
       
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v6
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: https://sonarcloud.io
-        with:
-          args: >
-            -Dsonar.organization=yahyaouiichrak
-            -Dsonar.projectKey=s-p-auth-service
-            -Dsonar.projectName=SamraPerfumes
-            -Dsonar.sources=apps/auth-service/src
-            -Dsonar.tests=apps/auth-service/tests
-            -Dsonar.javascript.lcov.reportPaths=apps/auth-service/coverage/lcov.info
-            -Dsonar.coverage.exclusions=**/*.test.js,**/tests/**,**/node_modules/**
-            -Dsonar.sourceEncoding=UTF-8
-
   # ==============================================
   # JOB 5: Security Scan (Trivy) - CORRIGÉ
   # ==============================================
